@@ -1,0 +1,27 @@
+-- DROP FUNCTION public.check_sale_date_anomalies();
+
+CREATE OR REPLACE FUNCTION check_sale_date_anomalies()
+RETURNS void AS
+$$
+DECLARE
+    anomaly_count INTEGER := 0;
+    property RECORD;
+BEGIN
+    FOR property IN 
+        SELECT reo.address, reo.listing_date, s.sale_date
+        FROM real_estate_objects reo
+        JOIN sales s ON reo.object_id = s.object_id
+        WHERE s.sale_date < reo.listing_date
+    LOOP
+        anomaly_count := anomaly_count + 1;
+        RAISE NOTICE 'Аномалия: объект по адресу % был продан раньше даты размещения (% < %)', 
+                     property.address, property.sale_date, property.listing_date;
+    END LOOP;
+
+    IF anomaly_count = 0 THEN
+        RAISE NOTICE 'Нет объектов с аномальной датой продажи.';
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+;
