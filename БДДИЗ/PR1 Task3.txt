@@ -1,0 +1,33 @@
+CREATE OR REPLACE FUNCTION get_price_changes(object_id_param INT)
+RETURNS TABLE (
+    change_date DATE,
+    new_price NUMERIC,
+    price_change NUMERIC,
+    percentage_change NUMERIC,
+    warning TEXT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    WITH price_differences AS (
+        SELECT 
+            pc.change_date,
+            pc.new_price,
+            LAG(pc.new_price) OVER (ORDER BY pc.change_date) AS previous_price
+        FROM price_changes pc
+        WHERE pc.object_id = object_id_param
+        ORDER BY pc.change_date
+    )
+    SELECT 
+        pd.change_date,
+        pd.new_price,
+        COALESCE(pd.new_price - pd.previous_price, 0) AS price_change,
+        COALESCE(ROUND(((pd.new_price - pd.previous_price) / pd.previous_price) * 100, 2), 0) AS percentage_change,
+        CASE 
+            WHEN COALESCE(((pd.new_price - pd.previous_price) / pd.previous_price) * 100, 0) > 20 THEN 'Больше 20%'
+            ELSE ''
+        END AS warning
+    FROM price_differences pd;
+END;
+$$;
