@@ -1,5 +1,3 @@
--- DROP FUNCTION public.check_area_consistency();
-
 CREATE OR REPLACE FUNCTION check_area_consistency()
 RETURNS VOID AS $$
 DECLARE
