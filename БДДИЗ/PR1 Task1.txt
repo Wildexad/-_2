@@ -1,0 +1,43 @@
+CREATE OR REPLACE FUNCTION public.reo_price_lower()
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+rec RECORD;
+avg_rating NUMERIC;
+BEGIN
+
+FOR rec IN
+SELECT reo.object_id, reo.price, reo.listing_date, AVG(a.assessment) AS avg_rating
+FROM real_estate_objects reo
+JOIN assessments a ON reo.object_id = a.object_id
+GROUP BY reo.object_id, reo.price, reo.listing_date
+LOOP
+
+IF AGE(CURRENT_DATE, rec.listing_date) > INTERVAL '6 months' THEN
+IF rec.avg_rating < 4 THEN
+UPDATE real_estate_objects
+SET price = price * 0.95
+WHERE object_id = rec.object_id;
+END IF;
+
+ELSIF AGE(CURRENT_DATE, rec.listing_date) > INTERVAL '9 months' THEN
+
+IF rec.avg_rating < 5 THEN
+UPDATE real_estate_objects
+SET price = price * 0.90
+WHERE object_id = rec.object_id;
+END IF;
+
+ELSIF AGE(CURRENT_DATE, rec.listing_date) > INTERVAL '12 months' THEN
+IF rec.avg_rating < 6 THEN
+UPDATE real_estate_objects
+SET price = price * 0.80
+WHERE object_id = rec.object_id;
+END IF;
+
+END IF;
+END LOOP;
+END;
+$function$
+;
