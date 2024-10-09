@@ -1,0 +1,31 @@
+-- DROP FUNCTION public.calculate_realtor_commission();
+CREATE OR REPLACE FUNCTION calculate_realtor_commission()
+RETURNS VOID AS $$
+DECLARE
+    rec RECORD;
+    commission_rate NUMERIC;
+BEGIN
+   
+    FOR rec IN
+        SELECT sale_id, price
+        FROM sales
+    LOOP
+   
+        IF rec.price < 1000000 THEN
+            commission_rate := 0.02; 
+        ELSIF rec.price >= 1000000 AND rec.price <= 3000000 THEN
+            commission_rate := 0.019;
+        ELSE
+            commission_rate := 0.017; 
+        END IF;
+
+
+        UPDATE sales
+        SET realtor_commission = rec.price * commission_rate
+        WHERE sale_id = rec.sale_id;
+    END LOOP;
+
+    RAISE NOTICE 'Комиссия риэлтора успешно рассчитана и обновлена.';
+END;
+$$ LANGUAGE plpgsql;
+;
