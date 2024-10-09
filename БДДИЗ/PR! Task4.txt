@@ -1,0 +1,30 @@
+-- DROP FUNCTION public.check_area_consistency();
+
+CREATE OR REPLACE FUNCTION check_area_consistency()
+RETURNS VOID AS $$
+DECLARE
+    rec RECORD;
+    total_room_area NUMERIC;
+BEGIN
+    FOR rec IN
+        SELECT
+            reo.object_id,
+            reo.address,
+            reo.total_area,
+            SUM(res.room_area) AS total_room_area
+        FROM
+            real_estate_objects reo
+        JOIN
+            real_estate_structure res ON reo.object_id = res.object_id
+        GROUP BY
+            reo.object_id, reo.address, reo.total_area
+    LOOP
+        IF rec.total_area != rec.total_room_area THEN
+            RAISE NOTICE 'Адрес: %, Расхождение: % м²', rec.address, rec.total_area - rec.total_room_area;
+        END IF;
+    END LOOP;
+
+    RAISE NOTICE 'Все площади объектов соответствуют сумме площадей комнат.';
+END;
+$$ LANGUAGE plpgsql;
+
