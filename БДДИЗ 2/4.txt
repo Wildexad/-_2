@@ -1,0 +1,33 @@
+CREATE OR REPLACE FUNCTION calculate_hourly_working_employees(working_day DATE)
+RETURNS TABLE(hourly_period TEXT, employee_count INTEGER) AS $$
+BEGIN
+    RETURN QUERY
+    WITH work_intervals AS (
+        SELECT 
+            Код_сотрудника,
+            Время AS entry_time,
+            LEAD(Время) OVER (PARTITION BY Код_сотрудника ORDER BY Время) AS exit_time,
+            EXTRACT(HOUR FROM Время) AS entry_hour
+        FROM worktime
+        WHERE DATE(Время) = working_day AND Показатель_карты = 1
+    ),
+    working_hours AS (
+        SELECT 
+            entry_hour,
+            Код_сотрудника,
+            entry_time,
+            exit_time,
+            (EXTRACT(EPOCH FROM (exit_time - entry_time)) / 60) AS work_minutes
+        FROM work_intervals
+        WHERE exit_time IS NOT NULL
+    )
+    SELECT
+        TO_CHAR(TIME '00:00:00' + (entry_hour || ' hour')::INTERVAL, 'HH24:MI') || '-' ||
+        TO_CHAR(TIME '00:00:00' + ((entry_hour + 1) || ' hour')::INTERVAL, 'HH24:MI:SS') AS hourly_period,
+        COUNT(Код_сотрудника)::INTEGER AS employee_count 
+    FROM working_hours
+    WHERE work_minutes = 60
+    GROUP BY entry_hour
+    ORDER BY entry_hour;
+END;
+$$ LANGUAGE plpgsql;

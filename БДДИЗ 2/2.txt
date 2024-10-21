@@ -1,0 +1,46 @@
+-- DROP FUNCTION public.check_worktime();
+
+CREATE OR REPLACE FUNCTION check_worktime(emp_id INT)
+RETURNS TABLE (employee_id INT, total_hours NUMERIC, status TEXT) AS
+$$
+DECLARE
+    work_start TIMESTAMP;
+    work_end TIMESTAMP;
+    total_time INTERVAL := '0 hours';
+BEGIN
+
+    FOR work_start, work_end IN
+        SELECT
+            w1.Время AS start_time,
+            w2.Время AS end_time
+        FROM
+            worktime w1
+        JOIN
+            worktime w2 ON w1.Код_сотрудника = w2.Код_сотрудника
+        WHERE
+            w1.Код_сотрудника = emp_id
+            AND w1.Показатель_карты = 1
+            AND w2.Показатель_карты = 2
+            AND w1.Время >= NOW() - INTERVAL '7 days'
+            AND w2.Время >= w1.Время
+    LOOP
+
+        total_time := total_time + (work_end - work_start);
+    END LOOP;
+
+
+    total_hours := EXTRACT(EPOCH FROM total_time) / 3600;
+
+
+    IF total_hours < 40 THEN
+        status := 'Меньше нормы';
+    ELSIF total_hours = 40 THEN
+        status := 'Норма';
+    ELSE
+        status := 'Больше нормы';
+    END IF;
+
+    RETURN QUERY SELECT emp_id, total_hours, status;
+END;
+$$ LANGUAGE plpgsql;
+;

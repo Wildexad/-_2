@@ -1,0 +1,27 @@
+CREATE OR REPLACE FUNCTION calculate_salary(employee_id INT, base_salary NUMERIC)
+RETURNS NUMERIC AS $$
+DECLARE
+    lateness_minutes INT;
+    lateness_coefficient NUMERIC := 1;
+    total_salary NUMERIC;
+BEGIN
+    SELECT EXTRACT(EPOCH FROM SUM(
+        CASE 
+            WHEN Показатель_карты = 1 AND Время::TIME > TIME '09:00:00' THEN
+                Время - TIMESTAMP '2023-03-13 09:00:00'
+            ELSE 
+                INTERVAL '0 minutes'
+        END)) / 60
+    INTO lateness_minutes
+    FROM worktime
+    WHERE Код_сотрудника = employee_id;
+
+    IF lateness_minutes > 0 THEN
+        lateness_coefficient := GREATEST(0, lateness_coefficient - (lateness_minutes / 10) * 0.05);
+    END IF;
+
+    total_salary := base_salary + (base_salary * lateness_coefficient);
+
+    RETURN total_salary;
+END;
+$$ LANGUAGE plpgsql;
