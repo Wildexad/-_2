@@ -1,0 +1,54 @@
+2. Триггер, проверяющий, что количество проданных на рейс билетов не превышает количество мест в автобусе
+
+CREATE OR REPLACE FUNCTION check_ticket_limit()
+RETURNS TRIGGER AS
+$$
+BEGIN
+  IF NEW.Количество_проданных_билетов > 
+     (SELECT Количество_мест FROM Типы_автомобилей WHERE Класс_автомобиля = (SELECT Тип FROM Транспортные_средства WHERE Гос_номерной_знак = NEW.Номер_ТС)) THEN
+    RAISE EXCEPTION 'Количество проданных билетов не может превышать количество мест в автобусе';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER ticket_limit_check
+BEFORE INSERT OR UPDATE ON Рейсы
+FOR EACH ROW EXECUTE FUNCTION check_ticket_limit();
+3. Проверка значений всех полей отношения "Маршруты", для которых могут быть определены домены
+
+CREATE OR REPLACE FUNCTION validate_route_fields()
+RETURNS TRIGGER AS
+$$
+BEGIN
+  IF NEW.Пункт_отправления IS NULL OR NEW.Пункт_прибытия IS NULL THEN
+    RAISE EXCEPTION 'Пункты отправления и прибытия не могут быть пустыми';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER validate_route_check
+BEFORE INSERT OR UPDATE ON Рейсы
+FOR EACH ROW EXECUTE FUNCTION validate_route_fields();
+4. Триггер, переносящий сведения об удаляемых рейсах в архив (в специальную таблицу)
+CREATE TABLE Архив_рейсов (
+  Идентификатор INT,
+  Водитель INT,
+  Пункт_отправления TEXT,
+  Пункт_прибытия TEXT,
+  Дата_и_время_отправления TIMESTAMP,
+  Дата_и_время_прибытия TIMESTAMP,
+  Длина_маршрута INT,
+  Количество_проданных_билетов INT
+);
+
+CREATE OR REPLACE FUNCTION archive_deleted_trip()
+RETURNS TRIGGER AS
+$$
+BEGIN
+  INSERT INTO Архив_рейсов
+  SELECT OLD.*;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
