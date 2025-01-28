@@ -1,0 +1,270 @@
+
+Задание 1. 
+ Спроектировать  структуру  документа  для  хранения  
+данных  об  объектах недвижимости и их продажах (адрес объекта 
+недвижимости, площадь, этаж, название района,  информация  о  продажи,  
+тип,  информация  о  динамике  цен)  в  документо-ориентированных СУБД 
+(формат хранения JSON). Информация о продаже хранится в массиве: дата 
+продажи, стоимость, риэлтор. Информация о динамике цен хранится в виде 
+объекта: дата изменения стоимости, новая стоимость. Каждый документ — это 
+один объект недвижимости. 
+2. Используя язык программирования C#, написать программу, которая 
+будет выполнять экспорт данных  из БД «Риэлторы» PostgreSQL в СУБД 
+MongoDB. При выполнении  повторной  выгрузки,  приложение  должно 
+проверять  наличие  данного объекта  недвижимости  в  БД MongoDB и  в  
+случае  наличия  -  производить  только обновление документа (например, при 
+добавлении его продажи). 
+using System; 
+using System.Linq; 
+using Npgsql; 
+using MongoDB.Bson; 
+using MongoDB.Driver; 
+class Program 
+{ 
+static void Main(string[] args) 
+{ 
+// Подключение к PostgreSQL 
+        string postgresConnStr = 
+"Host=localhost;Port=5432;Username=postgres;Password=NIKITOS_0413;Database=t
+ ransport"; 
+        using var pgConn = new NpgsqlConnection(postgresConnStr); 
+        pgConn.Open(); 
+ 
+        // Подключение к MongoDB 
+        var mongoClient = new MongoClient("mongodb://localhost:27017"); 
+        var mongoDb = mongoClient.GetDatabase("BDIZ5_PR62"); 
+        var mongoCollection = 
+mongoDb.GetCollection<BsonDocument>("realty_objects"); 
+ 
+        // Извлечение объектов недвижимости 
+        string query = @" 
+            SELECT r.object_id, r.address, r.area, r.floor, d.district_name, 
+t.type_name,  
+       s.sale_date, s.cost, rt.firstname || ' ' || rt.lastname AS realtor, 
+       pd.change_date, pd.new_price 
+        FROM realty_object r 
+        LEFT JOIN districts d ON r.district_id = d.district_id 
+        LEFT JOIN type t ON r.type_id = t.type_id 
+        LEFT JOIN sales s ON r.object_id = s.object_id 
+        LEFT JOIN realtors rt ON s.realtor_id = rt.realtor_id 
+        LEFT JOIN price_dynamics pd ON r.object_id = pd.object_id; 
+        "; 
+ 
+        using var pgCmd = new NpgsqlCommand(query, pgConn); 
+        using var reader = pgCmd.ExecuteReader(); 
+ 
+        while (reader.Read()) 
+        { 
+            Console.WriteLine("Нашёл объект с ID: " + 
+reader["object_id"].ToString()); 
+            var objectId = reader["object_id"].ToString(); 
+            var existingDocument = mongoCollection.Find(new 
+BsonDocument("object_id", objectId)).FirstOrDefault(); 
+ 
+            double areaValue = !DBNull.Value.Equals(reader["area"]) ? 
+Convert.ToDouble(reader["area"]) : 0; 
+            int floorValue = !DBNull.Value.Equals(reader["floor"]) ? 
+Convert.ToInt32(reader["floor"]) : 0; 
+            var districtValue = 
+!DBNull.Value.Equals(reader["district_name"]) ? 
+reader["district_name"].ToString() : ""; 
+            var typeValue = !DBNull.Value.Equals(reader["type_name"]) ? 
+reader["type_name"].ToString() : ""; 
+            var saleDateValue = !DBNull.Value.Equals(reader["sale_date"]) ? 
+BsonValue.Create(reader["sale_date"].ToString()) : BsonNull.Value; 
+            var costValue = !DBNull.Value.Equals(reader["cost"]) ? 
+BsonValue.Create(Convert.ToDouble(reader["cost"])) : BsonNull.Value; 
+            var realtorValue = !DBNull.Value.Equals(reader["realtor"]) ? 
+BsonValue.Create(reader["realtor"].ToString()) : BsonNull.Value; 
+            var changeDateValue = 
+!DBNull.Value.Equals(reader["change_date"]) ? 
+BsonValue.Create(reader["change_date"].ToString()) : BsonNull.Value; 
+            var newPriceValue = !DBNull.Value.Equals(reader["new_price"]) ? 
+BsonValue.Create(Convert.ToDouble(reader["new_price"])) : BsonNull.Value; 
+ 
+            if (existingDocument == null) 
+            { 
+                // Вставляем новый документ 
+                var newDocument = new BsonDocument 
+                { 
+                    { "object_id", objectId }, 
+                    { "address", !DBNull.Value.Equals(reader["address"]) ? 
+reader["address"].ToString() : "" }, 
+                    { "area", areaValue }, 
+                    { "floor", floorValue }, 
+                    { "district", districtValue }, 
+                    { "type", typeValue }, 
+                    { "sales", new BsonArray() }, 
+                    { "price_dynamics", new BsonArray() } 
+                }; 
+                mongoCollection.InsertOne(newDocument); 
+ 
+                // Если есть данные о продаже или динамике цены, добавим после 
+вставки 
+                var updateDef = Builders<BsonDocument>.Update; 
+                var updates = new List<UpdateDefinition<BsonDocument>>(); 
+ 
+                if (saleDateValue != BsonNull.Value || costValue != 
+BsonNull.Value || realtorValue != BsonNull.Value) 
+                { 
+                    updates.Add(updateDef.AddToSet("sales", new BsonDocument 
+                    { 
+                        { "date", saleDateValue }, 
+                        { "price", costValue }, 
+                        { "realtor", realtorValue } 
+                    })); 
+                } 
+ 
+                if (changeDateValue != BsonNull.Value || newPriceValue != 
+BsonNull.Value) 
+                { 
+                    updates.Add(updateDef.AddToSet("price_dynamics", new 
+BsonDocument 
+                    { 
+                        { "date", changeDateValue }, 
+                        { "new_price", newPriceValue } 
+                    })); 
+                } 
+ 
+                if (updates.Count > 0) 
+                { 
+                    mongoCollection.UpdateOne(new BsonDocument("object_id", 
+objectId), updateDef.Combine(updates)); 
+                } 
+            } 
+            else 
+            { 
+                // Обновляем продажи и динамику цен 
+                var update = Builders<BsonDocument>.Update.Combine( 
+                    Builders<BsonDocument>.Update.AddToSet("sales", new 
+BsonDocument 
+                    { 
+                        { "date", saleDateValue }, 
+                        { "price", costValue }, 
+                        { "realtor", realtorValue } 
+                    }), 
+                    Builders<BsonDocument>.Update.AddToSet("price_dynamics", 
+new BsonDocument 
+                    { 
+                        { "date", changeDateValue }, 
+                        { "new_price", newPriceValue } 
+                    }) 
+                ); 
+                mongoCollection.UpdateOne(new BsonDocument("object_id", 
+objectId), update); 
+} 
+} 
+Console.WriteLine("Экспорт завершён."); 
+} 
+} 
+3. В созданном приложении должны выполняться следующие запросы к 
+БД MongoDB: 
+3.1.  Вывести  все  проданные  объекты  недвижимости  указанного  
+риэлтора. Отсортировать по убыванию площади. 
+3.2.  Вывести  количество  и  среднюю  стоимость  проданных  объектов 
+недвижимости по каждому району. Отсортировать по возрастанию 
+количества. 
+db["realty_objects"].aggregate([ 
+{ $unwind: "$sales" }, 
+{ $group: { _id: "$district", count: { $sum: 1 }, avgPrice: { $avg: 
+"$sales.price" } } }, 
+{ $sort: { count: 1 } } 
+]); 
+3.3.  Вывести  количество  проданных  объектов  недвижимости  в  
+указанный промежуток времени. 
+db["realty_objects"].aggregate([ 
+{ $unwind: "$sales" }, 
+{ 
+$addFields: { 
+"sales.date_converted": { 
+$dateFromString: { 
+dateString: "$sales.date", 
+format: "%d.%m.%Y %H:%M:%S" 
+} 
+} 
+} 
+}, 
+{ 
+$match: { 
+"sales.date_converted": { 
+$gte: ISODate("2023-01-01T00:00:00Z"), 
+$lte: ISODate("2023-12-31T23:59:59Z") 
+} 
+} 
+}, 
+{ $count: "salesCount" } 
+]); 
+ 
+3.4. Вывести названия районов, в которых количество продаж составило 
+от 3 до 5. 
+db["realty_objects"].aggregate([ 
+  { $unwind: "$sales" }, 
+  { 
+    $addFields: { 
+      "sales.date_converted": { 
+        $dateFromString: { 
+          dateString: "$sales.date", 
+          format: "%d.%m.%Y %H:%M:%S" 
+        } 
+      } 
+    } 
+  }, 
+  { 
+    $group: { 
+      _id: "$district", 
+      salesCount: { $sum: 1 } 
+    } 
+  }, 
+  { 
+    $match: { 
+      salesCount: { $gte: 3, $lte: 5 } 
+    } 
+  }, 
+  { 
+    $project: { 
+      district: "$_id", 
+      _id: 0 
+    } 
+  } 
+]); 
+
+ 
+3.5.  Вывести  ФИО  риэлторов,  которые  продали  больше  всего  
+объектов недвижимости  по стоимости 1м2 больше 350000 руб. 
+db["realty_objects"].aggregate([ 
+  { $unwind: "$sales" }, 
+  { 
+    $addFields: { 
+      "sales.date_converted": { 
+        $dateFromString: { 
+          dateString: "$sales.date", 
+          format: "%d.%m.%Y %H:%M:%S" 
+        } 
+      }, 
+      "sales.price_converted": { 
+        $convert: { input: "$sales.price", to: "double", onError: 0, onNull: 0 } 
+      } 
+    } 
+  }, 
+  { 
+    $project: { 
+      "sales.realtor": 1, 
+      pricePerM2: { $divide: ["$sales.price_converted", "$area"] } 
+    } 
+  }, 
+  { 
+    $match: { 
+      pricePerM2: { $gt: 350000 } 
+    } 
+  }, 
+  { 
+    $group: { 
+      _id: "$sales.realtor", 
+      count: { $sum: 1 } 
+    } 
+  }, 
+  { $sort: { count: -1 } }, 
+  { $limit: 1 } 
+]); 
+ 
+ 
